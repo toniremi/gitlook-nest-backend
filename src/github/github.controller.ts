@@ -3,7 +3,6 @@ import {
   Get,
   Query,
   Res,
-  InternalServerErrorException,
   HttpStatus,
   Param,
   UnauthorizedException,

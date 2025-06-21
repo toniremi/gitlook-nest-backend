@@ -58,3 +58,4 @@ package:
 
 plugins:
   - serverless-offline # Still useful for local development
+  - serverless-prune-plugin # Optional, helps reduce package size by removing unnecessary files
