@@ -1,0 +1,60 @@
+service: gitlook-nest-backend
+
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: nodejs20.x # Use a recent Node.js runtime
+  region: ap-northeast-3 # Choose your desired AWS region
+  memorySize: 1024 # Memory allocated to your Lambda function (in MB)
+  timeout: 30 # Maximum execution time for your Lambda function (in seconds)
+  stage: dev # Deployment stage (e.g., dev, prod)
+  environment:
+    GITHUB_CLIENT_ID: ${ssm:/gitlook-nest-backend/${sls:stage}/github-client-id}
+    GITHUB_CLIENT_SECRET: ${ssm:/gitlook-nest-backend/${sls:stage}/github-client-secret}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+          Resource:
+            - 'arn:aws:ssm:${aws:region}:*:parameter/gitlook-nest-backend/${sls:stage}/github-client-id'
+            - 'arn:aws:ssm:${aws:region}:*:parameter/gitlook-nest-backend/${sls:stage}/github-client-secret'
+
+# New 'build' block for native esbuild configuration
+build:
+  esbuild:
+    bundle: true
+    minify: false # Set to true for production to reduce size
+    sourcemap: true # Keep true for debugging, false for production if not needed
+    target: 'node20' # Match your Lambda runtime
+    external: # Any modules that should NOT be bundled but provided by Lambda or layers
+      - '@aws-sdk/*' # AWS SDK is typically available in Lambda runtime
+
+functions:
+  main:
+    handler: dist/lambda.handler # The handler points directly to the compiled JS file in the root of the zip
+    events:
+      - httpApi:
+          path: /
+          method: '*'
+      - httpApi:
+          path: /{proxy+}
+          method: '*' 
+
+package:
+  patterns:
+    # Serverless v4 with esbuild handles bundling for 'dist' automatically
+    # You might not need explicit patterns if esbuild bundles everything correctly
+    # However, it's good practice to ensure only what's needed is included.
+    - '!node_modules/**' # Esbuild bundles, so node_modules are not needed separately
+    - '!src/**'
+    - '!test/**'
+    - 'package.json'
+    - 'package-lock.json'
+    - '!serverless.yml' # Exclude serverless.yml from the final package if you want a cleaner bundle (optional)
+    # The esbuild output will be put directly into the zip file root, so no 'dist/**' is strictly needed in patterns
+
+plugins:
+  - serverless-offline # Still useful for local development
