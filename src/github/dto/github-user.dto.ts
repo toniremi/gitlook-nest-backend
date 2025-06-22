@@ -1,6 +1,6 @@
 // src/github/interfaces/github-user.interface.ts
 
-export interface GitHubUser {
+export class GitHubUserDto {
   login: string;
   id: number;
   node_id: string;

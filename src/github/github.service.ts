@@ -8,8 +8,8 @@ import { HttpService } from '@nestjs/axios';
 import { AxiosError } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs'; // For converting Observables to Promises
-import { GitHubUser } from './interfaces/github-user.interface';
-import { GitHubApiErrorResponse } from './interfaces/github-error.interface';
+import { GitHubUserDto } from './dto/github-user.dto';
+import { GitHubApiErrorResponseDto } from './dto/github-error.dto';
 
 @Injectable()
 export class GithubService {
@@ -81,10 +81,10 @@ export class GithubService {
    * @param accessToken The GitHub access token.
    * @returns User data from GitHub.
    */
-  async getAuthenticatedUser(accessToken: string): Promise<GitHubUser> {
+  async getAuthenticatedUser(accessToken: string): Promise<GitHubUserDto> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<GitHubUser>('https://api.github.com/user', {
+        this.httpService.get<GitHubUserDto>('https://api.github.com/user', {
           headers: {
             Authorization: `token ${accessToken}`,
           },
@@ -93,7 +93,8 @@ export class GithubService {
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError) {
-        const githubErrorData = error.response?.data as GitHubApiErrorResponse;
+        const githubErrorData = error.response
+          ?.data as GitHubApiErrorResponseDto;
         const statusCode = error.response?.status; // Type: number | undefined
 
         const errorMessage =

@@ -1,6 +1,6 @@
 // src/github/interfaces/github-error.interface.ts
 
-export interface GitHubApiErrorResponse {
+export class GitHubApiErrorResponseDto {
   message?: string;
   documentation_url?: string;
   // For OAuth specific errors
