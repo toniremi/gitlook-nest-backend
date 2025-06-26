@@ -1,15 +1,12 @@
-import {
-  BadRequestException,
-  Injectable,
-  InternalServerErrorException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { AxiosError } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs'; // For converting Observables to Promises
-import { GitHubUserDto } from './dto/github-user.dto';
+import { UserDto } from './dto/github-user.dto';
 import { GitHubApiErrorResponseDto } from './dto/github-error.dto';
+import { GitHubAccessTokenResponseDto } from './dto/github-token.dto';
+import { RepositoryDto } from './dto/github-repository.dto';
 
 @Injectable()
 export class GithubService {
@@ -21,14 +18,10 @@ export class GithubService {
     private readonly configService: ConfigService,
   ) {
     this.GITHUB_CLIENT_ID = this.configService.get<string>('GITHUB_CLIENT_ID')!;
-    this.GITHUB_CLIENT_SECRET = this.configService.get<string>(
-      'GITHUB_CLIENT_SECRET',
-    )!;
+    this.GITHUB_CLIENT_SECRET = this.configService.get<string>('GITHUB_CLIENT_SECRET')!;
 
     if (!this.GITHUB_CLIENT_ID || !this.GITHUB_CLIENT_SECRET) {
-      throw new InternalServerErrorException(
-        'GitHub Client ID or Secret not configured.',
-      );
+      throw new InternalServerErrorException('GitHub Client ID or Secret not configured.');
     }
   }
 
@@ -46,7 +39,7 @@ export class GithubService {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.post(
+        this.httpService.post<GitHubAccessTokenResponseDto | GitHubApiErrorResponseDto>(
           'https://github.com/login/oauth/access_token',
           params,
           {
@@ -57,22 +50,45 @@ export class GithubService {
         ),
       );
 
-      if (response.data && response.data.access_token) {
+      // Check if the response data contains an access_token (successful scenario)
+      // Use a type guard or check for a property unique to the success DTO
+      if ('access_token' in response.data && response.data.access_token) {
         return response.data.access_token;
       } else {
-        console.error('GitHub access token error response:', response.data);
+        // If 'access_token' is not present, it's likely an error payload even if HTTP status was 200 OK.
+        // Cast to the error response interface to safely access error properties.
+        const errorData = response.data as GitHubApiErrorResponseDto;
+        console.error('GitHub access token error response payload:', errorData);
+
+        // Throw an UnauthorizedException with details from the error payload
         throw new UnauthorizedException(
-          `Failed to get access token: ${response.data.error_description || response.data.error || 'Unknown error'}`,
+          `Failed to get access token: ${errorData.error_description || errorData.error || 'Unknown error from GitHub payload.'}`,
         );
       }
     } catch (error) {
-      console.error(
-        'Error exchanging code for access token:',
-        error.response?.data || error.message,
-      );
-      throw new InternalServerErrorException(
-        `Error exchanging code for access token: ${error.response?.data?.error_description || error.message}`,
-      );
+      if (error instanceof AxiosError) {
+        const githubErrorData = error.response?.data as GitHubApiErrorResponseDto;
+        const statusCode = error.response?.status; // Type: number | undefined
+
+        const errorMessage = githubErrorData?.error_description || githubErrorData?.error || error.message;
+
+        // NEW: Check if statusCode is a number before comparing
+        if (typeof statusCode === 'number') {
+          if (statusCode === 400 || statusCode === 401) {
+            throw new UnauthorizedException(`Failed to exchange code for token: ${errorMessage}`);
+          } else if (statusCode >= 400 && statusCode < 500) {
+            throw new BadRequestException(`GitHub token exchange client error: ${errorMessage}`);
+          } else {
+            throw new InternalServerErrorException(`GitHub token exchange error: ${errorMessage}`);
+          }
+        } else {
+          // Handle cases where no HTTP status code was received (e.g., network issues)
+          throw new InternalServerErrorException(`GitHub token exchange network error: ${errorMessage}`);
+        }
+      } else if (error instanceof Error) {
+        throw new InternalServerErrorException(`An unexpected error occurred during token exchange: ${error.message}`);
+      }
+      throw new InternalServerErrorException(`An unknown error occurred during token exchange: ${String(error)}`);
     }
   }
 
@@ -81,10 +97,10 @@ export class GithubService {
    * @param accessToken The GitHub access token.
    * @returns User data from GitHub.
    */
-  async getAuthenticatedUser(accessToken: string): Promise<GitHubUserDto> {
+  async getAuthenticatedUser(accessToken: string): Promise<UserDto> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<GitHubUserDto>('https://api.github.com/user', {
+        this.httpService.get<UserDto>('https://api.github.com/user', {
           headers: {
             Authorization: `token ${accessToken}`,
           },
@@ -93,44 +109,28 @@ export class GithubService {
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError) {
-        const githubErrorData = error.response
-          ?.data as GitHubApiErrorResponseDto;
+        const githubErrorData = error.response?.data as GitHubApiErrorResponseDto;
         const statusCode = error.response?.status; // Type: number | undefined
 
-        const errorMessage =
-          githubErrorData?.error_description ||
-          githubErrorData?.error ||
-          error.message;
+        const errorMessage = githubErrorData?.error_description || githubErrorData?.error || error.message;
 
         // NEW: Check if statusCode is a number before comparing
         if (typeof statusCode === 'number') {
           if (statusCode === 400 || statusCode === 401) {
-            throw new UnauthorizedException(
-              `Failed to exchange code for token: ${errorMessage}`,
-            );
+            throw new UnauthorizedException(`Failed to exchange code for token: ${errorMessage}`);
           } else if (statusCode >= 400 && statusCode < 500) {
-            throw new BadRequestException(
-              `GitHub token exchange client error: ${errorMessage}`,
-            );
+            throw new BadRequestException(`GitHub token exchange client error: ${errorMessage}`);
           } else {
-            throw new InternalServerErrorException(
-              `GitHub token exchange error: ${errorMessage}`,
-            );
+            throw new InternalServerErrorException(`GitHub token exchange error: ${errorMessage}`);
           }
         } else {
           // Handle cases where no HTTP status code was received (e.g., network issues)
-          throw new InternalServerErrorException(
-            `GitHub token exchange network error: ${errorMessage}`,
-          );
+          throw new InternalServerErrorException(`GitHub token exchange network error: ${errorMessage}`);
         }
       } else if (error instanceof Error) {
-        throw new InternalServerErrorException(
-          `An unexpected error occurred during token exchange: ${error.message}`,
-        );
+        throw new InternalServerErrorException(`An unexpected error occurred during token exchange: ${error.message}`);
       }
-      throw new InternalServerErrorException(
-        `An unknown error occurred during token exchange: ${String(error)}`,
-      );
+      throw new InternalServerErrorException(`An unknown error occurred during token exchange: ${String(error)}`);
     }
   }
 
@@ -140,26 +140,42 @@ export class GithubService {
    * @param accessToken The GitHub access token (optional if user is public).
    * @returns User details from GitHub.
    */
-  async getUser(username: string, accessToken?: string): Promise<any> {
+  async getUser(username: string, accessToken?: string): Promise<UserDto> {
     try {
       const headers: Record<string, string> = {};
       if (accessToken) {
         headers['Authorization'] = `token ${accessToken}`;
       }
       const response = await firstValueFrom(
-        this.httpService.get(`https://api.github.com/users/${username}`, {
+        this.httpService.get<UserDto>(`https://api.github.com/users/${username}`, {
           headers,
         }),
       );
       return response.data;
     } catch (error) {
-      console.error(
-        `Error fetching user ${username}:`,
-        error.response?.data || error.message,
-      );
-      throw new InternalServerErrorException(
-        `Error fetching user ${username}: ${error.response?.data?.message || error.message}`,
-      );
+      if (error instanceof AxiosError) {
+        const githubErrorData = error.response?.data as GitHubApiErrorResponseDto;
+        const statusCode = error.response?.status; // Type: number | undefined
+
+        const errorMessage = githubErrorData?.error_description || githubErrorData?.error || error.message;
+
+        // NEW: Check if statusCode is a number before comparing
+        if (typeof statusCode === 'number') {
+          if (statusCode === 400 || statusCode === 401) {
+            throw new UnauthorizedException(`Failed to exchange code for token: ${errorMessage}`);
+          } else if (statusCode >= 400 && statusCode < 500) {
+            throw new BadRequestException(`GitHub token exchange client error: ${errorMessage}`);
+          } else {
+            throw new InternalServerErrorException(`GitHub token exchange error: ${errorMessage}`);
+          }
+        } else {
+          // Handle cases where no HTTP status code was received (e.g., network issues)
+          throw new InternalServerErrorException(`GitHub token exchange network error: ${errorMessage}`);
+        }
+      } else if (error instanceof Error) {
+        throw new InternalServerErrorException(`An unexpected error occurred during token exchange: ${error.message}`);
+      }
+      throw new InternalServerErrorException(`An unknown error occurred during token exchange: ${String(error)}`);
     }
   }
 
@@ -170,30 +186,42 @@ export class GithubService {
    * @param accessToken The GitHub access token (optional if repo is public).
    * @returns Repository details from GitHub.
    */
-  async getRepo(
-    owner: string,
-    repo: string,
-    accessToken?: string,
-  ): Promise<any> {
+  async getRepo(owner: string, repo: string, accessToken?: string): Promise<RepositoryDto> {
     try {
       const headers: Record<string, string> = {};
       if (accessToken) {
         headers['Authorization'] = `token ${accessToken}`;
       }
       const response = await firstValueFrom(
-        this.httpService.get(`https://api.github.com/repos/${owner}/${repo}`, {
+        this.httpService.get<RepositoryDto>(`https://api.github.com/repos/${owner}/${repo}`, {
           headers,
         }),
       );
       return response.data;
     } catch (error) {
-      console.error(
-        `Error fetching repo ${owner}/${repo}:`,
-        error.response?.data || error.message,
-      );
-      throw new InternalServerErrorException(
-        `Error fetching repo ${owner}/${repo}: ${error.response?.data?.message || error.message}`,
-      );
+      if (error instanceof AxiosError) {
+        const githubErrorData = error.response?.data as GitHubApiErrorResponseDto;
+        const statusCode = error.response?.status; // Type: number | undefined
+
+        const errorMessage = githubErrorData?.error_description || githubErrorData?.error || error.message;
+
+        // NEW: Check if statusCode is a number before comparing
+        if (typeof statusCode === 'number') {
+          if (statusCode === 400 || statusCode === 401) {
+            throw new UnauthorizedException(`Failed to exchange code for token: ${errorMessage}`);
+          } else if (statusCode >= 400 && statusCode < 500) {
+            throw new BadRequestException(`GitHub token exchange client error: ${errorMessage}`);
+          } else {
+            throw new InternalServerErrorException(`GitHub token exchange error: ${errorMessage}`);
+          }
+        } else {
+          // Handle cases where no HTTP status code was received (e.g., network issues)
+          throw new InternalServerErrorException(`GitHub token exchange network error: ${errorMessage}`);
+        }
+      } else if (error instanceof Error) {
+        throw new InternalServerErrorException(`An unexpected error occurred during token exchange: ${error.message}`);
+      }
+      throw new InternalServerErrorException(`An unknown error occurred during token exchange: ${String(error)}`);
     }
   }
 }
