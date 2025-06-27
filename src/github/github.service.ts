@@ -180,6 +180,50 @@ export class GithubService {
   }
 
   /**
+   * Fetches user details by username from GitHub.
+   * @param accessToken The GitHub access token (optional if user is public).
+   * @returns User details from GitHub.
+   */
+  async getUsers(accessToken?: string): Promise<UserDto[]> {
+    try {
+      const headers: Record<string, string> = {};
+      if (accessToken) {
+        headers['Authorization'] = `token ${accessToken}`;
+      }
+      const response = await firstValueFrom(
+        this.httpService.get<UserDto[]>(`https://api.github.com/users`, {
+          headers,
+        }),
+      );
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const githubErrorData = error.response?.data as GitHubApiErrorResponseDto;
+        const statusCode = error.response?.status; // Type: number | undefined
+
+        const errorMessage = githubErrorData?.error_description || githubErrorData?.error || error.message;
+
+        // NEW: Check if statusCode is a number before comparing
+        if (typeof statusCode === 'number') {
+          if (statusCode === 400 || statusCode === 401) {
+            throw new UnauthorizedException(`Failed to exchange code for token: ${errorMessage}`);
+          } else if (statusCode >= 400 && statusCode < 500) {
+            throw new BadRequestException(`GitHub token exchange client error: ${errorMessage}`);
+          } else {
+            throw new InternalServerErrorException(`GitHub token exchange error: ${errorMessage}`);
+          }
+        } else {
+          // Handle cases where no HTTP status code was received (e.g., network issues)
+          throw new InternalServerErrorException(`GitHub token exchange network error: ${errorMessage}`);
+        }
+      } else if (error instanceof Error) {
+        throw new InternalServerErrorException(`An unexpected error occurred during token exchange: ${error.message}`);
+      }
+      throw new InternalServerErrorException(`An unknown error occurred during token exchange: ${String(error)}`);
+    }
+  }
+
+  /**
    * Fetches repository details from GitHub.
    * @param owner The repository owner's username.
    * @param repo The repository name.

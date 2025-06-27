@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  Res,
-  HttpStatus,
-  Param,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Controller, Get, Query, Res, HttpStatus, Param, UnauthorizedException } from '@nestjs/common';
 import { Response } from 'express'; // Import Response from express for redirection
 import { GithubService } from './github.service';
 import { ConfigService } from '@nestjs/config';
@@ -29,9 +21,7 @@ export class GithubController {
   @Get('login')
   githubLogin(@Res() res: Response) {
     const scopes = 'user,repo'; // Define the permissions your app needs
-    const redirectUri = encodeURIComponent(
-      `http://localhost:3000/github/oauth/callback`,
-    ); // For local testing
+    const redirectUri = encodeURIComponent(`http://localhost:3000/github/oauth/callback`); // For local testing
 
     // In a deployed environment, you would use your actual deployed API Gateway URL:
     // const redirectUri = encodeURIComponent(`${this.configService.get<string>('API_GATEWAY_URL')}/github/oauth/callback`);
@@ -50,9 +40,7 @@ export class GithubController {
   async githubCallback(@Query('code') code: string, @Res() res: Response) {
     if (!code) {
       // Handle missing code, e.g., user denied access
-      return res
-        .status(HttpStatus.BAD_REQUEST)
-        .send('Authorization code not provided.');
+      return res.status(HttpStatus.BAD_REQUEST).send('Authorization code not provided.');
     }
 
     try {
@@ -62,10 +50,9 @@ export class GithubController {
       return res.redirect(`/github/success?token=${accessToken}`);
     } catch (error) {
       console.error('GitHub OAuth Callback Error:', error);
-      // Redirect to an error page or render an error message
-      return res
-        .status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .send(`Authentication failed: ${error.message}`);
+      // Safely access the message property after checking the error type.
+      const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send(`Authentication failed: ${message}`);
     }
   }
 
@@ -96,14 +83,20 @@ export class GithubController {
   }
 
   /**
+   * Example endpoint to get a list of users.
+   * Access via: GET /github/users?access_token=... (optional)
+   */
+  @Get('users')
+  async getUsersList(@Query('access_token') accessToken?: string) {
+    return this.githubService.getUsers(accessToken);
+  }
+
+  /**
    * Example endpoint to get a public user's profile by username.
    * Access via: GET /github/users/:username?access_token=... (optional)
    */
   @Get('users/:username')
-  async getUserProfile(
-    @Param('username') username: string,
-    @Query('access_token') accessToken?: string,
-  ) {
+  async getUserProfile(@Param('username') username: string, @Query('access_token') accessToken?: string) {
     return this.githubService.getUser(username, accessToken);
   }
 
